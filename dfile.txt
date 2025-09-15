@@ -1,0 +1,65 @@
+FROM ubuntu:22.04
+
+# Prevent some Debian packages from asking interactive questions on install.
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies for PAPI and cyPAPI.  We need a C/C++ compiler,
+# make, git, pkg-config, Python, pip, and development tools.  If your
+# roofline generator uses additional Python libraries (e.g. pandas or
+# matplotlib) they are installed below as well.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential \
+       git \
+       pkg-config \
+       libtool \
+       autoconf \
+       automake \
+       python3 \
+       python3-pip \
+       python3-dev \
+       ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir \
+        cython>=3.0.0 \
+        numpy \
+        matplotlib \
+        pandas \
+        seaborn \
+        pkgconfig
+
+
+ARG PAPI_GIT_REF=a239b884b2fde0da425ad66b19c5836590b64e40
+
+RUN git clone https://github.com/icl-utk-edu/papi.git /tmp/papi \
+    && cd /tmp/papi \
+    && git checkout "$PAPI_GIT_REF" \
+    && cd src \
+    && ./configure --prefix=/opt/papi --with-components="perf_event" \
+    && make -j$(nproc) \
+    && make install \
+    && rm -rf /tmp/papi
+
+ENV PAPI_DIR=/opt/papi \
+    PAPI_PATH=/opt/papi \
+    LD_LIBRARY_PATH=/opt/papi/lib:${LD_LIBRARY_PATH}
+
+RUN git clone https://github.com/icl-utk-edu/cyPAPI.git /tmp/cyPAPI \
+    && cd /tmp/cyPAPI \
+    && export PAPI_DIR=/opt/papi \
+    && make install \
+    && rm -rf /tmp/cyPAPI
+
+
+COPY ContainerFolder/ /opt/roofline/
+
+
+ENV PYTHONPATH="/opt/roofline:${PYTHONPATH}"
+
+# Set the working directory.  This is where the user starts when running
+# the container and where relative imports in your scripts will resolve.
+WORKDIR /opt/roofline
+
+# roofline_generator/main.py).
+CMD ["python3", "profiler.py"]

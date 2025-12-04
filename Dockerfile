@@ -1,64 +1,70 @@
+# GPU-ready base image
 FROM nvcr.io/nvidia/cuda:12.3.2-devel-ubuntu22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       build-essential \
-       git \
-       pkg-config \
-       libtool \
-       autoconf \
-       automake \
-       python3 \
-       python3-pip \
-       python3-dev \
-       ca-certificates \
+# ---- System packages ----
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        pkg-config \
+        libtool \
+        autoconf \
+        automake \
+        python3 \
+        python3-pip \
+        python3-dev \
+        ca-certificates \
+        wget \
+        cmake \
+        libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# symlink nvcc so PAPI's tests find it
-RUN ln -s /usr/local/cuda/bin/nvcc /usr/bin/nvcc || true \
-    && ln -s /usr/local/cuda/bin/nvcc /bin/nvcc || true
+# Make "python" == "python3"
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
-RUN pip3 install --no-cache-dir \
-        cython>=3.0.0 \
-        numpy \
-        matplotlib \
+# ---- Python packages (PyTorch, etc.) ----
+# NOTE: adjust versions/index-url if needed depending on your CUDA/toolchain.
+RUN python -m pip install --upgrade pip && \
+    python -m pip install --no-cache-dir \
         pandas \
-        seaborn \
-        pkgconfig
+        matplotlib
 
-ARG PAPI_GIT_REF=a239b884b2fde0da425ad66b19c5836590b64e40
+# Install CUDA-enabled PyTorch + torchvision.
+# This combo is an example; adjust if you hit a version mismatch.
+RUN python -m pip install --no-cache-dir \
+    torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-RUN git clone https://github.com/icl-utk-edu/papi.git /tmp/papi \
-    && cd /tmp/papi \
-    && git checkout "$PAPI_GIT_REF" \
-    && cd src \
-    && env PAPI_CUDA_ROOT=/usr/local/cuda ./configure \
-         --prefix=/opt/papi --with-components="cuda" \
-    # first build everything (library + component tests)
-    && make -j$(nproc) \
-    # then install the built library into /opt/papi
-    && make install \
-    && rm -rf /tmp/papi
+# ---- Build and install PAPI from source ----
+ENV PAPI_PREFIX=/opt/papi
 
-ENV PAPI_DIR=/opt/papi \
-    PAPI_PATH=/opt/papi \
-    PAPI_CUDA_ROOT=/usr/local/cuda \
-    LD_LIBRARY_PATH=/opt/papi/lib:/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH} \
-    PATH=/usr/local/cuda/bin:${PATH}
+RUN git clone https://github.com/icl-utk-edu/papi.git /tmp/papi && \
+    cd /tmp/papi/src && \
+    ./configure --prefix=${PAPI_PREFIX} && \
+    make -j"$(nproc)" && \
+    make install && \
+    rm -rf /tmp/papi
 
-# install cyPAPI
-RUN git clone https://github.com/icl-utk-edu/cyPAPI.git /tmp/cyPAPI \
-    && cd /tmp/cyPAPI \
-    && export PAPI_DIR=/opt/papi PAPI_PATH=/opt/papi \
-             C_INCLUDE_PATH=/opt/papi/include LIBRARY_PATH=/opt/papi/lib \
-             LD_LIBRARY_PATH=/opt/papi/lib:${LD_LIBRARY_PATH} \
-    && make install \
-    && rm -rf /tmp/cyPAPI
+# ---- Build and install cyPAPI ----
+ENV PAPI_DIR=${PAPI_PREFIX} \
+    PAPI_PATH=${PAPI_PREFIX} \
+    C_INCLUDE_PATH=${PAPI_PREFIX}/include \
+    LIBRARY_PATH=${PAPI_PREFIX}/lib \
+    LD_LIBRARY_PATH=${PAPI_PREFIX}/lib:${LD_LIBRARY_PATH}
 
-# copy your project files into the image
-COPY . /opt/roofline/
-ENV PYTHONPATH=/opt/roofline:$PYTHONPATH
+RUN git clone https://github.com/icl-utk-edu/cyPAPI.git /tmp/cyPAPI && \
+    cd /tmp/cyPAPI && \
+    make install && \
+    rm -rf /tmp/cyPAPI
+
+# ---- Copy your RooflineGenerator project ----
+# Assuming Dockerfile is in RooflineGenerator/ on your host
 WORKDIR /opt/roofline
-CMD ["python3", "profiler.py"]
+COPY . /opt/roofline
+
+# Let Python see your project
+ENV PYTHONPATH=/opt/roofline:${PYTHONPATH}
+
+# Default command: run your main handler (change to "profiler.py" if desired)
+CMD ["python", "ModelHandler.py"]

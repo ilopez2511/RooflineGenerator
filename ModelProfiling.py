@@ -66,7 +66,7 @@ def time_forward(model, x) -> float:
 
 
 def time_backward(model, x) -> float:
-    """Measure backward time once (ms) with no counters."""
+    #Measure backward time once (ms) with no counters.
     model.zero_grad(set_to_none=True)
     if torch.cuda.is_available():
         with autocast(device_type="cuda"):
@@ -87,7 +87,7 @@ def time_backward(model, x) -> float:
 
 
 def count_event_forward(event_name, event_code, model, x) -> float:
-    """Run one forward pass and count a single CUDA event."""
+    #Run one forward pass and count a single CUDA event.
     es = cyp.CypapiCreateEventset()
     es.add_event(event_code)
     _sync()
@@ -104,7 +104,7 @@ def count_event_forward(event_name, event_code, model, x) -> float:
 
 
 def count_event_backward(event_name, event_code, model, x) -> float:
-    """Run one backward pass (fresh graph) and count a single event."""
+    #Run one backward pass (fresh graph) and count a single event.
     model.zero_grad(set_to_none=True)
     if torch.cuda.is_available():
         with autocast(device_type="cuda"):
